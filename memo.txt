@@ -1,0 +1,159 @@
+了解しました！
+以下に、**VS Code + Streamlit + BigQuery** を使った**ローカル開発から Web 公開までの概要手順**をわかりやすくまとめます。
+
+---
+
+## ✅ 全体の開発手順概要（Streamlit + BigQuery）
+
+### ステップ 1: 開発環境の準備（VS Code）
+
+### ステップ 2: BigQuery 認証のセットアップ
+
+### ステップ 3: Streamlit アプリの作成
+
+### ステップ 4: ローカルで動作確認
+
+### ステップ 5: 公開（Streamlit Cloud or Cloud Run）
+
+---
+
+## 🔧 ステップ 1: 開発環境の準備
+
+### 必要なツール
+
+* Python 3.8+
+* VS Code
+* pip（パッケージ管理）
+* GCP アカウント（BigQuery にアクセス可能なプロジェクト）
+
+### 仮想環境の作成（推奨）
+以下の仮想環境作成はLINUXで行う（具体的にはVSCODE左下のリモート接続でWSLに接続した状態で行う）
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate  
+```
+
+### 必要なライブラリのインストール
+
+```bash
+pip install streamlit google-cloud-bigquery pandas plotly
+```
+
+---
+
+## 🔐 ステップ 2: BigQuery 認証のセットアップ
+
+1. [Google Cloud Console](https://console.cloud.google.com/) にアクセス
+2. 対象プロジェクトを選択
+3. 「IAMと管理」→「サービスアカウント」を開く
+4. 新しいサービスアカウントを作成し、`BigQuery User` ロールを付与
+5. 認証情報（JSON形式）をダウンロード
+6. JSONファイル名を `credentials.json` に変更（任意）
+
+> ※ `.gitignore` に `credentials.json` を追加してGitHubに公開しないように！
+
+---
+
+## 🧑‍💻 ステップ 3: Streamlit アプリの作成（例）
+
+`app.py`:
+
+```python
+import streamlit as st
+from google.cloud import bigquery
+import pandas as pd
+import plotly.express as px
+
+# 認証情報の読み込み
+client = bigquery.Client.from_service_account_json("credentials.json")
+
+# データ取得
+query = """
+    SELECT Datetime, future_price, ATM
+    FROM `python-op-373206.JPX_web_data.Key_IV_Points`
+    ORDER BY Datetime DESC
+    LIMIT 400
+"""
+df = client.query(query).to_dataframe()
+df = df.dropna(subset=['ATM'])
+
+# グラフ描画
+st.title("ATM IV Chart")
+fig = px.line(df.sort_values('Datetime'), x='Datetime', y='ATM', title='ATM IV Over Time')
+st.plotly_chart(fig)
+```
+
+---
+
+## 🚀 ステップ 4: ローカルでStreamlitを起動
+
+```bash
+streamlit run app.py
+```
+
+→ `http://localhost:8501` が自動でブラウザに表示されます。
+
+---
+
+## 🌐 ステップ 5: Webに公開（2通り）
+
+### ✅ 方法 A: Streamlit Cloud（簡単）
+
+1. [Streamlit Cloud](https://streamlit.io/cloud) にログイン（GitHub連携）
+2. GitHub にソースコードを push
+3. 「New app」でリポジトリを選択
+4. **環境変数に BigQuery 認証を設定する必要あり（やや複雑）**
+
+🔐 注意：`credentials.json` をアップロードできないため、環境変数や secrets 管理が必要です
+
+---
+
+### ✅ 方法 B: Google Cloud Run（本格的）
+
+1. Dockerfile を作成
+2. Google Cloud SDK で Cloud Run にデプロイ
+3. `credentials.json` は環境変数で読み込むようにする
+4. 公開URLが発行される（例：`https://atm-iv-viewer.a.run.app`）
+
+---
+
+## 🗂️ プロジェクト構成例
+
+```
+my-streamlit-app/
+├── app.py
+├── credentials.json  ← .gitignoreに追加！
+├── requirements.txt
+└── .gitignore
+```
+
+### `requirements.txt`
+
+```text
+streamlit
+pandas
+plotly
+google-cloud-bigquery
+```
+
+### `.gitignore`
+
+```
+credentials.json
+__pycache__/
+venv/
+```
+
+---
+
+## ✋ 必要なら次もサポートできます
+
+* `requirements.txt` / `Dockerfile` 作成
+* Streamlit Cloud での BigQuery 認証の設定方法
+* Google Cloud Run へのデプロイ手順
+* ログイン不要で見せられるURLの公開方法
+
+---
+
+ご希望の公開方法（Streamlit Cloud か Google Cloud Run）を教えていただければ、次の手順をご案内します！
