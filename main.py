@@ -30,6 +30,18 @@ st.set_page_config(layout="wide") # ページレイアウトをワイドに設�
 # Streamlit タイトル
 st.title("📈 BigQuery データビューア")
 
+# --- Simple Secret Test ---
+st.subheader("Simple Environment Variable Test")
+my_test_var_value = os.environ.get("MY_TEST_VARIABLE")
+st.write(f"Value of MY_TEST_VARIABLE: `{my_test_var_value}`")
+
+if my_test_var_value == "HelloStreamlitCloud":
+    st.success("Successfully read MY_TEST_VARIABLE from Secrets!")
+else:
+    st.error("Failed to read MY_TEST_VARIABLE from Secrets. Please check Streamlit Cloud Secrets configuration for MY_TEST_VARIABLE.")
+# --- End of Simple Secret Test ---
+
+
 @st.cache_data # パフォーマンス向上とBigQueryコスト削減のためデータをキャッシュ
 def load_data_from_bigquery(project_id: str, dataset_id: str, table_id: str) -> pd.DataFrame:
     """指定されたBigQueryテーブルからデータを読み込みます。"""
