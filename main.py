@@ -24,6 +24,9 @@ if "GOOGLE_APPLICATION_CREDENTIALS" not in os.environ:
     # 後続の bigquery.Client() 呼び出しがこの環境変数に依存していると失敗します。
     # そのエラーは以下の try-except ブロックで捕捉されます。
 
+# --- ページ設定 ---
+st.set_page_config(layout="wide") # ページレイアウトをワイドに設定
+
 # Streamlit タイトル
 st.title("📈 BigQuery データビューア")
 
