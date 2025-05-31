@@ -36,6 +36,7 @@ def load_data_from_bigquery(project_id: str, dataset_id: str, table_id: str) -> 
     try:
         # キャッシュされる関数内でクライアントを初期化し、正しいプロジェクトに関連付けます
         client = bigquery.Client(project=project_id)
+        st.success("BigQuery client initialized successfully!")
         query = f"""
         SELECT
             Datetime,
