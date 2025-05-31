@@ -33,10 +33,29 @@ st.title("📈 BigQuery データビューア")
 @st.cache_data # パフォーマンス向上とBigQueryコスト削減のためデータをキャッシュ
 def load_data_from_bigquery(project_id: str, dataset_id: str, table_id: str) -> pd.DataFrame:
     """指定されたBigQueryテーブルからデータを読み込みます。"""
+    client = None
+    gac_path_func = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+
     try:
-        # キャッシュされる関数内でクライアントを初期化し、正しいプロジェクトに関連付けます
-        client = bigquery.Client(project=project_id)
-        st.success("BigQuery client initialized successfully!")
+        if gac_path_func and os.path.exists(gac_path_func):
+            # 環境変数から取得したJSONファイルのパスを明示的に使用してクライアントを初期化
+            client = bigquery.Client.from_service_account_json(
+                gac_path_func, project=project_id
+            )
+            st.success("BigQuery client initialized successfully using explicit JSON path!")
+        elif gac_path_func:
+            # 環境変数は設定されているが、ファイルが存在しない場合
+            st.error(f"load_data_from_bigquery: 認証情報ファイルが見つかりません。パス: '{gac_path_func}'。Streamlit Secretsの設定を確認してください。")
+            return pd.DataFrame()
+        else:
+            # 環境変数が設定されていない場合
+            st.error("load_data_from_bigquery: GOOGLE_APPLICATION_CREDENTIALS 環境変数が設定されていません。Streamlit Secretsの設定を確認してください。")
+            return pd.DataFrame()
+
+        if not client: # 上記の条件分岐で client が None のままだった場合 (念のため)
+            st.error("load_data_from_bigquery: BigQueryクライアントの初期化に失敗しました。")
+            return pd.DataFrame()
+
         query = f"""
         SELECT
             Datetime,
@@ -57,6 +76,7 @@ def load_data_from_bigquery(project_id: str, dataset_id: str, table_id: str) -> 
         return df
     except Exception as e:
         st.error(f"BigQuery のクエリ実行中にエラーが発生しました: {e}")
+        st.exception(e) # デバッグ用に完全なトレースバックを表示
         return pd.DataFrame() # エラー時は空のDataFrameを返す
 
 # --- メインアプリロジック ---
@@ -64,15 +84,32 @@ try:
     # この呼び出しで認証情報が使用されます。
     # Streamlit Cloudでは、GOOGLE_APPLICATION_CREDENTIALS はSecretsから設定されるべきです。
     # ローカルでは、上記のロジックによりファイルが存在すれば設定されるべきです。
-    bigquery_client_test = bigquery.Client(project=PROJECT_ID) # クライアント初期化のテスト
+    gac_path_main = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+    if gac_path_main and os.path.exists(gac_path_main):
+        # 環境変数から取得したJSONファイルのパスを明示的に使用してクライアントを初期化 (テスト用)
+        bigquery_client_test = bigquery.Client.from_service_account_json(
+            gac_path_main, project=PROJECT_ID
+        )
+        # st.info("Test BigQuery client explicitly initialized using service account JSON.") # デバッグ用
+    elif gac_path_main:
+        # 環境変数は設定されているが、ファイルが存在しない場合
+        st.error(
+            f"認証エラー: GOOGLE_APPLICATION_CREDENTIALS が '{gac_path_main}' に設定されていますが、"
+            "ファイルが見つかりません。Streamlit CloudのSecrets設定を確認してください。"
+        )
+        st.stop()
+    else:
+        # 環境変数が設定されていない場合
+        st.error(
+            "認証エラー: GOOGLE_APPLICATION_CREDENTIALS 環境変数が設定されていません。"
+            "Streamlit CloudのSecrets設定、またはローカルの認証情報ファイルを確認してください。"
+        )
+        st.stop()
 except Exception as e:
-    st.error(f"BigQueryクライアントの初期化または認証に失敗しました: {e}")
-    st.error(
-        "以下の点を確認してください:\n"
-        "1. ローカル実行の場合: 認証情報ファイル (`streamlit-bq-access.json`) が正しい場所にあり、内容が有効であること。\n"
-        "2. Streamlit Community Cloud等のデプロイ環境の場合: SecretsにGoogle Cloudの認証情報が正しく設定されていること。\n"
-        "3. プロジェクトID (`{PROJECT_ID}`) が正しいこと、および指定されたサービスアカウントに必要な権限が付与されていること。"
-    )
+    # 既存のエラーメッセージに加えて、より詳細な情報を表示
+    st.error(f"BigQueryクライアントの初期化または認証に失敗しました (明示的初期化試行中): {e}")
+    st.error("詳細なエラー情報と解決策については、アプリケーションのログと上記のメッセージを確認してください。")
+    st.exception(e) # デバッグ用に完全なトレースバックを表示
     st.stop()
 
 df = load_data_from_bigquery(PROJECT_ID, DATASET_ID, TABLE_ID)
