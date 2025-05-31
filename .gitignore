@@ -1,0 +1,13 @@
+# Sensitive files
+streamlit-bq-access.json
+*.json # より一般的にJSONキーファイルを除外する場合
+
+# Python specific
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+*.env
