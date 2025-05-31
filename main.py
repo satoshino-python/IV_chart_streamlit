@@ -82,7 +82,8 @@ def load_data_from_bigquery(project_id: str, dataset_id: str, table_id: str) -> 
 
             credentials = service_account.Credentials.from_service_account_info(creds_info)
             client = bigquery.Client(credentials=credentials, project=client_project_id)
-            st.success("BigQuery client initialized successfully using st.secrets['gcp_service_account']!")
+            # 初期化に成功したときのコメント
+            # st.success("BigQuery client initialized successfully using st.secrets['gcp_service_account']!")
 
         if not client: # 上記のロジックでclientが設定されなかった場合の最終チェック
             st.error("load_data_from_bigquery: BigQueryクライアントの初期化に失敗しました（予期せぬ状態）。")
@@ -98,12 +99,15 @@ def load_data_from_bigquery(project_id: str, dataset_id: str, table_id: str) -> 
           Datetime DESC # 最新のデータを取得するために降順にする
         LIMIT 400; # 最新から400件を取得
         """
-        st.info(f"クエリ実行中: `{project_id}.{dataset_id}.{table_id}`...")
+        # ステータスメッセージ
+        # st.info(f"クエリ実行中: `{project_id}.{dataset_id}.{table_id}`...")
         df = client.query(query).to_dataframe()
         # グラフ表示等のためにDatetimeで昇順にソートし直す
         if not df.empty and "Datetime" in df.columns:
             df = df.sort_values(by="Datetime", ascending=True).reset_index(drop=True)
-        st.success("データの読み込みに成功しました！")
+        
+        #st.success("データの読み込みに成功しました！")
+        
         return df
     except Exception as e: # その他の認証エラーやクエリエラー
         st.error(f"BigQuery の処理中にエラーが発生しました: {e}")
