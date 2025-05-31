@@ -3,6 +3,8 @@ import pandas as pd
 import os
 from google.cloud import bigquery
 import plotly.graph_objects as go
+from google.oauth2 import service_account # 追加: サービスアカウント情報を扱うため
+import json # 追加: JSON文字列を辞書にパースするため
 from plotly.subplots import make_subplots
 import db_dtypes # PandasがBigQueryのデータ型をより良く扱うために推奨
 
@@ -13,19 +15,27 @@ PROJECT_ID = "python-op-373206" # JSONファイルから取得したプロジェ
 DATASET_ID = "JPX_web_data"
 TABLE_ID = "Key_IV_Points"
 
-# --- Google Cloud 認証情報の設定 ---
-# Streamlit Cloudなどの環境で環境変数 GOOGLE_APPLICATION_CREDENTIALS が設定されていない場合の
-# ローカル開発用のフォールバックとして、ローカルのJSONファイルを使用します。
-if "GOOGLE_APPLICATION_CREDENTIALS" not in os.environ:
+# --- ローカル開発用の認証情報フォールバック (オプション) ---
+# Streamlit Cloudでは st.secrets を使用しますが、ローカルで st.secrets が利用できない場合に
+# 従来の環境変数やローカルファイルベースの認証を試みるためのものです。
+# Streamlit Cloudでのデプロイ時には、st.secrets["gcp_service_account"] が優先されます。
+LOCAL_DEV_AUTH = os.environ.get("LOCAL_DEV_AUTH", "false").lower() == "true"
+if LOCAL_DEV_AUTH and "GOOGLE_APPLICATION_CREDENTIALS" not in os.environ:
     local_credentials_path = os.path.join(os.path.dirname(__file__), CREDENTIALS_FILENAME)
     if os.path.exists(local_credentials_path):
         os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = local_credentials_path
-    # ローカルファイルが存在せず、環境変数も設定されていない場合、
-    # 後続の bigquery.Client() 呼び出しがこの環境変数に依存していると失敗します。
-    # そのエラーは以下の try-except ブロックで捕捉されます。
 
 # --- ページ設定 ---
 st.set_page_config(layout="wide") # ページレイアウトをワイドに設定
+
+# --- デバッグ情報表示 ---
+st.sidebar.subheader("デバッグ情報 (ローカル開発用)")
+st.sidebar.write(f"LOCAL_DEV_AUTH: `{LOCAL_DEV_AUTH}` (環境変数 LOCAL_DEV_AUTH で 'true' を設定)")
+gac_env_val = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+st.sidebar.write(f"GOOGLE_APPLICATION_CREDENTIALS: `{gac_env_val}`")
+if LOCAL_DEV_AUTH and gac_env_val:
+    st.sidebar.write(f"GAC ファイル存在確認: `{os.path.exists(gac_env_val)}`")
+st.sidebar.markdown("---")
 
 # Streamlit タイトル
 st.title("📈 BigQuery データビューア")
@@ -33,29 +43,60 @@ st.title("📈 BigQuery データビューア")
 @st.cache_data # パフォーマンス向上とBigQueryコスト削減のためデータをキャッシュ
 def load_data_from_bigquery(project_id: str, dataset_id: str, table_id: str) -> pd.DataFrame:
     """指定されたBigQueryテーブルからデータを読み込みます。"""
-    client = None
-    gac_path_func = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-
+    client = None # client変数を初期化
     try:
-        if gac_path_func and os.path.exists(gac_path_func):
-            # 環境変数から取得したJSONファイルのパスを明示的に使用してクライアントを初期化
-            client = bigquery.Client.from_service_account_json(
-                gac_path_func, project=project_id
-            )
-            st.success("BigQuery client initialized successfully using explicit JSON path!")
-        elif gac_path_func:
-            # 環境変数は設定されているが、ファイルが存在しない場合
-            st.error(f"load_data_from_bigquery: 認証情報ファイルが見つかりません。パス: '{gac_path_func}'。Streamlit Secretsの設定を確認してください。")
-            return pd.DataFrame()
-        else:
-            # 環境変数が設定されていない場合
-            st.error("load_data_from_bigquery: GOOGLE_APPLICATION_CREDENTIALS 環境変数が設定されていません。Streamlit Secretsの設定を確認してください。")
-            return pd.DataFrame()
+        if LOCAL_DEV_AUTH:
+            # ローカル開発用の認証を試行
+            if "GOOGLE_APPLICATION_CREDENTIALS" not in os.environ:
+                st.error("load_data_from_bigquery (local dev): LOCAL_DEV_AUTH is true, but GOOGLE_APPLICATION_CREDENTIALS 環境変数が設定されていません。")
+                return pd.DataFrame()
 
-        if not client: # 上記の条件分岐で client が None のままだった場合 (念のため)
-            st.error("load_data_from_bigquery: BigQueryクライアントの初期化に失敗しました。")
-            return pd.DataFrame()
+            gac_path_func = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+            if not (gac_path_func and os.path.exists(gac_path_func)):
+                st.error(f"load_data_from_bigquery (local dev): 認証情報ファイルが見つかりません。パス: '{gac_path_func}'。")
+                return pd.DataFrame()
 
+            client = bigquery.Client.from_service_account_json(gac_path_func, project=project_id)
+            st.info("BigQuery client initialized using local GOOGLE_APPLICATION_CREDENTIALS (for local development).")
+        else: # LOCAL_DEV_AUTH is False (Streamlit Cloud or local secrets.toml mode)
+            # Streamlit Cloud または ローカルの secrets.toml から認証情報を取得
+            try:
+                creds_data = st.secrets.get("gcp_service_account")
+            except FileNotFoundError: # ローカルで secrets.toml が見つからない場合
+                st.error("load_data_from_bigquery: ローカル実行で secrets.toml が見つかりません。LOCAL_DEV_AUTH=true を設定するか、.streamlit/secrets.toml を作成してください。")
+                return pd.DataFrame()
+
+            if not creds_data:
+                st.error("load_data_from_bigquery: Streamlit Secretsに 'gcp_service_account' が設定されていません。")
+                return pd.DataFrame()
+
+            creds_info = None
+            if isinstance(creds_data, str): # Secretsの値がJSON文字列の場合
+                try:
+                    creds_info = json.loads(creds_data)
+                except json.JSONDecodeError:
+                    st.error("load_data_from_bigquery: st.secrets['gcp_service_account'] は有効なJSON文字列ではありません。")
+                    return pd.DataFrame()
+            elif isinstance(creds_data, dict): # Secretsの値が辞書の場合 (TOMLテーブル形式)
+                creds_info = creds_data
+            else:
+                st.error("load_data_from_bigquery: st.secrets['gcp_service_account'] の形式が不正です（文字列でも辞書でもありません）。")
+                return pd.DataFrame()
+
+            # クライアント初期化に使用するプロジェクトIDを決定
+            # creds_infoにproject_idがあればそれを使用、なければグローバルなPROJECT_IDを使用
+            client_project_id = creds_info.get("project_id", project_id)
+            if not client_project_id:
+                st.error("load_data_from_bigquery: プロジェクトIDが認証情報またはグローバル設定で見つかりません。")
+                return pd.DataFrame()
+
+            credentials = service_account.Credentials.from_service_account_info(creds_info)
+            client = bigquery.Client(credentials=credentials, project=client_project_id)
+            st.success("BigQuery client initialized successfully using st.secrets['gcp_service_account']!")
+
+        if not client: # 上記のロジックでclientが設定されなかった場合の最終チェック
+            st.error("load_data_from_bigquery: BigQueryクライアントの初期化に失敗しました（予期せぬ状態）。")
+            return pd.DataFrame()
         query = f"""
         SELECT
             Datetime,
@@ -74,44 +115,13 @@ def load_data_from_bigquery(project_id: str, dataset_id: str, table_id: str) -> 
             df = df.sort_values(by="Datetime", ascending=True).reset_index(drop=True)
         st.success("データの読み込みに成功しました！")
         return df
-    except Exception as e:
-        st.error(f"BigQuery のクエリ実行中にエラーが発生しました: {e}")
+    except Exception as e: # その他の認証エラーやクエリエラー
+        st.error(f"BigQuery の処理中にエラーが発生しました: {e}")
         st.exception(e) # デバッグ用に完全なトレースバックを表示
         return pd.DataFrame() # エラー時は空のDataFrameを返す
 
 # --- メインアプリロジック ---
-try:
-    # この呼び出しで認証情報が使用されます。
-    # Streamlit Cloudでは、GOOGLE_APPLICATION_CREDENTIALS はSecretsから設定されるべきです。
-    # ローカルでは、上記のロジックによりファイルが存在すれば設定されるべきです。
-    gac_path_main = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-    if gac_path_main and os.path.exists(gac_path_main):
-        # 環境変数から取得したJSONファイルのパスを明示的に使用してクライアントを初期化 (テスト用)
-        bigquery_client_test = bigquery.Client.from_service_account_json(
-            gac_path_main, project=PROJECT_ID
-        )
-        # st.info("Test BigQuery client explicitly initialized using service account JSON.") # デバッグ用
-    elif gac_path_main:
-        # 環境変数は設定されているが、ファイルが存在しない場合
-        st.error(
-            f"認証エラー: GOOGLE_APPLICATION_CREDENTIALS が '{gac_path_main}' に設定されていますが、"
-            "ファイルが見つかりません。Streamlit CloudのSecrets設定を確認してください。"
-        )
-        st.stop()
-    else:
-        # 環境変数が設定されていない場合
-        st.error(
-            "認証エラー: GOOGLE_APPLICATION_CREDENTIALS 環境変数が設定されていません。"
-            "Streamlit CloudのSecrets設定、またはローカルの認証情報ファイルを確認してください。"
-        )
-        st.stop()
-except Exception as e:
-    # 既存のエラーメッセージに加えて、より詳細な情報を表示
-    st.error(f"BigQueryクライアントの初期化または認証に失敗しました (明示的初期化試行中): {e}")
-    st.error("詳細なエラー情報と解決策については、アプリケーションのログと上記のメッセージを確認してください。")
-    st.exception(e) # デバッグ用に完全なトレースバックを表示
-    st.stop()
-
+# 認証とデータ取得は load_data_from_bigquery 関数に任せます。
 df = load_data_from_bigquery(PROJECT_ID, DATASET_ID, TABLE_ID)
 
 if not df.empty:
