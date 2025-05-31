@@ -11,3 +11,7 @@ __pycache__/
 env/
 venv/
 *.env
+# Streamlit secrets file for local development
+.streamlit/secrets.toml
+# Or, if you might place secrets.toml directly in the root (less common for Streamlit)
+# secrets.toml
