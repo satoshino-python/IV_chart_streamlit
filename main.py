@@ -71,17 +71,7 @@ def load_data_from_bigquery(project_id: str, dataset_id: str, table_id: str) -> 
                 return pd.DataFrame()
 
             creds_info = None
-            if isinstance(creds_data, str): # Secretsの値がJSON文字列の場合
-                try:
-                    creds_info = json.loads(creds_data)
-                except json.JSONDecodeError:
-                    st.error("load_data_from_bigquery: st.secrets['gcp_service_account'] は有効なJSON文字列ではありません。")
-                    return pd.DataFrame()
-            elif isinstance(creds_data, dict): # Secretsの値が辞書の場合 (TOMLテーブル形式)
-                creds_info = creds_data
-            else:
-                st.error("load_data_from_bigquery: st.secrets['gcp_service_account'] の形式が不正です（文字列でも辞書でもありません）。")
-                return pd.DataFrame()
+            creds_info = creds_data
 
             # クライアント初期化に使用するプロジェクトIDを決定
             # creds_infoにproject_idがあればそれを使用、なければグローバルなPROJECT_IDを使用
