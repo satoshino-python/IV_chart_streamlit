@@ -40,7 +40,9 @@ st.sidebar.markdown("---")
 # Streamlit タイトル
 st.title("📈 BigQuery データビューア")
 
-@st.cache_data # パフォーマンス向上とBigQueryコスト削減のためデータをキャッシュ
+# パフォーマンス向上とBigQueryコスト削減のためデータをキャッシュ
+# ttl (Time To Live) を設定して、キャッシュの有効期限を設けます。
+@st.cache_data(ttl="15m") # 例: 15分ごとにキャッシュを無効化
 def load_data_from_bigquery(project_id: str, dataset_id: str, table_id: str) -> pd.DataFrame:
     """指定されたBigQueryテーブルからデータを読み込みます。"""
     client = None # client変数を初期化
